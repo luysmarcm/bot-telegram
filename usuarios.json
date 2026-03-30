@@ -1,0 +1,97 @@
+{
+  "admins": [
+    "luysmarcm",
+    "futtert",
+    "jnieto0"
+  ],
+  "usuarios": [
+    {
+      "username": "luysmarcm",
+      "nombre": "Luysmar Colmenares"
+    },
+    {
+      "username": "futtert",
+      "nombre": "Alexander Freitez"
+    },
+    {
+      "username": "jnieto0",
+      "nombre": "Jesús Nieto"
+    },
+    {
+      "username": "josemendez19",
+      "nombre": "José Méndez (IP)"
+    },
+    {
+      "username": "armando_cm",
+      "nombre": "Armando Cortez"
+    },
+    {
+      "username": "gustavoapoher",
+      "nombre": "Gustavo Aponte"
+    },
+    {
+      "username": "cleonosal",
+      "nombre": "CARLOS LEON"
+    },
+    {
+      "username": "gracebertti",
+      "nombre": "GRACE BERTTI"
+    },
+    {
+      "username": "jonasbatista02",
+      "nombre": "JONAS BATISTA"
+    },
+    {
+      "username": "jkuiman",
+      "nombre": "JONATHAN KUIMAN"
+    },
+    {
+      "username": "josman974",
+      "nombre": "JOSE MOLINA"
+    },
+    {
+      "username": "marcoscastill",
+      "nombre": "Marcos Castillo"
+    },
+    {
+      "username": "nevirguez",
+      "nombre": "Néstor Virguez y jesus Gutierrez"
+    },
+    {
+      "username": "EJPV2218",
+      "nombre": "Elier Peraza / Euclides"
+    },
+    {
+      "username": "erosales13",
+      "nombre": "Eliezer Rosales"
+    },
+    {
+      "username": "elyjcf",
+      "nombre": "Ely Calderón / Héctor Matos"
+    },
+    {
+      "username": "joc9019",
+      "nombre": "José Calderón / Brian"
+    },
+    {
+      "username": "erasequera",
+      "nombre": "Erasmo Sequera/ Dennis"
+    },
+    {
+      "username": "ajvu2310",
+      "nombre": "Andrés virguez / Johnny Hernández"
+    },
+    {
+      "username": "todani57",
+      "nombre": "Daniel Torrealba/ franyer"
+    },
+    {
+      "username": "danieljc19",
+      "nombre": "Daniel Cabrera"
+    },
+    {
+      "username": "elit0405",
+      "nombre": "Elitssnder / julio Alcalá"
+    }
+  ]
+}
