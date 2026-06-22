@@ -37,6 +37,7 @@ ZONAS_NOMBRES = {
     "CRCO01":     "Caricuao — CRCO01",
     "QBOR01":     "Quíbor — QBOR01",
     "BRMZI01":    "Barquisimeto Zona Industrial — BRMZI01",
+    "CRR01":      "Carora — CRR01",
 }
 
 # ── Estados ───────────────────────────────────────────────────
@@ -555,11 +556,17 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = requests.post(url, json={"userId": 1}, timeout=60)
         log.info(f"[api] status={response.status_code} cedula={cedula}")
 
-        data     = response.json()
-        clientes = data if isinstance(data, list) else [data]
-        clientes = [c for c in clientes if not c.get("message") and not c.get("warning")]
+        data       = response.json()
+        data_field = data.get("data") if isinstance(data, dict) else data
 
-        if not clientes:
+        if isinstance(data_field, dict):
+            registros = [data_field]          # un solo contrato → lo envolvemos en lista
+        elif isinstance(data_field, list):
+            registros = data_field            # varios contratos → ya es lista
+        else:
+            registros = []
+
+        if not registros:
             mensaje = data.get("message") if isinstance(data, dict) else "No encontrado"
             log.warning(f"[api] no encontrado — cedula={cedula}")
             await msg.edit_text(
@@ -570,13 +577,29 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ESPERANDO_CEDULA
 
-        log.info(f"[api] encontrado — cedula={cedula} total={len(clientes)}")
+        # Cada registro tiene cliente.wisphub (contrato) y cliente.cliente815
+        # (lista de registros ópticos/815; puede ser null o vacía)
+        mensajes_a_enviar = []
+        for registro in registros:
+            cliente           = registro.get("cliente", registro)
+            wisphub           = cliente.get("wisphub", cliente)
+            cliente815_lista  = cliente.get("cliente815") or []
+            meta              = cliente.get("meta", {})
+
+            if not cliente815_lista:
+                # Sin datos 815 — wisphub + sección óptica vacía
+                mensajes_a_enviar.append(formatear_cliente(wisphub, None, meta))
+            else:
+                # Un mensaje por cada registro 815 asociado al mismo contrato
+                for c815 in cliente815_lista:
+                    mensajes_a_enviar.append(formatear_cliente(wisphub, c815, meta))
+
+        log.info(f"[api] encontrado — cedula={cedula} contratos={len(registros)} mensajes={len(mensajes_a_enviar)}")
         await msg.delete()
 
-        for i, entrada in enumerate(clientes):
-            cliente = entrada.get("cliente", entrada)
-            log.info(f"[resultado] {i+1}/{len(clientes)} nombre={cliente.get('nombre')}")
-            await update.message.reply_text(formatear_cliente(cliente), parse_mode="Markdown")
+        for i, texto in enumerate(mensajes_a_enviar):
+            log.info(f"[resultado] {i+1}/{len(mensajes_a_enviar)}")
+            await update.message.reply_text(texto, parse_mode="Markdown")
 
         await update.message.reply_text(
             f"🪪 Escribe otra cédula para consultar en *{zona}*\n"
@@ -595,7 +618,6 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ *Error inesperado:*\n`{e}`", parse_mode="Markdown")
 
     return ESPERANDO_CEDULA
-
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║                   MENU HANDLER                          ║
@@ -868,56 +890,44 @@ def formatear_onu(c: dict) -> str:
     )
 
 
-def formatear_cliente(c: dict) -> str:
-    nombre        = c.get("nombre", "—")
-    conector      = c.get("conector") or str(c.get("id_servicio", "—"))
-    cedula        = c.get("extra_1") or c.get("cedula", "—")
-    domicilio     = c.get("domicilio") or c.get("direccion", "—")
-    telefono      = c.get("telefono", "—")
-    email         = c.get("email", "—")
-    zona          = c.get("zona", {})
-    zona_nombre   = zona.get("nombre", "—") if isinstance(zona, dict) else str(zona)
-    fecha_alta    = c.get("fecha_de_alta") or c.get("fecha_instalacion", "—")
-    fecha_corte   = c.get("fecha_corte", "—")
-    estado_factura = c.get("estado_facturas", "—")
-    plan          = c.get("plan_internet", {})
-    plan_nombre   = plan.get("nombre", "—") if isinstance(plan, dict) else str(plan)
-    activa        = c.get("activa", None)
-    estado_wisphub = c.get("estado", "—")
-    serial        = c.get("numero_de_serie", "—")
-    mac           = c.get("direccion_mac", "—")
-    estado_optico = c.get("estado_optico", "—")
-    onu_rx        = c.get("ultimo_rx_power_onu", "—")
-    onu_tx        = c.get("ultimo_tx_power_onu", "—")
-    olt_rx        = c.get("ultimo_rx_power_puerto", "—")
-    olt_tx        = c.get("ultimo_tx_power_puerto", "—")
+def formatear_cliente(wisphub: dict, c815: dict | None, meta: dict | None = None) -> str:
+    meta = meta or {}
 
-    # # Parsear PING desde diagnostico
-    # diag = c.get("diagnostico", {})
-    # conexion = diag.get("conexion", {})
-    # ping_data = conexion.get("conexion_ping_icmp", "")
-    # ping_result = parsear_ping(ping_data)
-    # dentro_de_cuota = conexion.get("dentro_de_cuota", False)
+    nombre         = wisphub.get("nombre", "—")
+    conector       = wisphub.get("servicio") or str(wisphub.get("id_servicio", "—"))
+    cedula         = wisphub.get("cedula", "—")
+    domicilio      = wisphub.get("direccion", "—")
+    telefono       = wisphub.get("telefono", "—")
+    email          = wisphub.get("email", "—")
+    zona           = wisphub.get("zona", {})
+    zona_nombre    = zona.get("nombre", "—") if isinstance(zona, dict) else str(zona)
+    fecha_alta     = wisphub.get("fecha_instalacion", "—")
+    fecha_corte    = wisphub.get("fecha_corte", "—")
+    estado_factura = wisphub.get("estado_facturas", "—")
+    plan           = wisphub.get("plan_internet", {})
+    plan_nombre    = plan.get("nombre", "—") if isinstance(plan, dict) else str(plan)
+    estado_wisphub = wisphub.get("estado", "—")
 
-    estado_815      = "✅ Activo" if activa is True else ("❌ Inactivo" if activa is False else "— Desconocido")
-    es_offline      = "offline" in str(estado_optico).lower()
-    icono_optico    = "🔴" if es_offline else "🟢"
+    # ── Datos 815 / ópticos (pueden no existir) ──────────────
+    if c815:
+        activa        = c815.get("activa", None)
+        serial        = c815.get("numero_de_serie", "—")
+        mac           = c815.get("direccion_mac", "—")
+        estado_optico = c815.get("estado_optico", "—")
+    else:
+        activa        = None
+        serial        = "—"
+        mac           = "—"
+        estado_optico = "—"
 
-    # Sección de conectividad
-    # seccion_ping = ""
-    # if ping_result["es_exitoso"]:
-    #     seccion_ping = (
-    #         f"\n🌐 *Conectividad PING*\n"
-    #         f"  {ping_result['ping_summary']}\n"
-    #         f"  RTT promedio: {ping_result['rtt_avg']} ms\n"
-    #         f"  📊 Dentro de cuota: {'✅ Sí' if dentro_de_cuota else '❌ No'}\n"
-    #     )
-    # elif ping_data:
-    #     seccion_ping = (
-    #         f"\n🌐 *Conectividad PING*\n"
-    #         f"  ❌ Sin respuesta — {ping_result['packet_loss']}% pérdida\n"
-    #         f"  📊 Dentro de cuota: {'✅ Sí' if dentro_de_cuota else '❌ No'}\n"
-    #     )
+    estado_815   = "✅ Activo" if activa is True else ("❌ Inactivo" if activa is False else "— Desconocido")
+    es_offline   = "offline" in str(estado_optico).lower()
+    icono_optico = "🔴" if es_offline else ("🟢" if c815 else "⚪")
+
+    aviso_815 = ""
+    if not c815:
+        warning = meta.get("warning", "Sin datos en 815")
+        aviso_815 = f"\n⚠️ _{warning}_"
 
     return (
         f"👤 *{nombre}*\n"
@@ -935,17 +945,14 @@ def formatear_cliente(c: dict) -> str:
         f"📊 *Estados*\n"
         f"  Contrato: {estado_wisphub}\n"
         f"  815: {estado_815}\n"
-        f"  Facturas: {estado_factura}\n\n"
-        f"📡 *Óptica (último registro)*\n"
+        f"  Facturas: {estado_factura}\n"
+        f"{aviso_815}\n\n"
+        f"📡 *Información de la ONU*\n"
         f"  Serial: `{serial}`\n"
         f"  MAC: `{mac}`\n"
-        f"  ONU RX: `{onu_rx} dBm`   TX: `{onu_tx} dBm`\n"
-        f"  OLT RX: `{olt_rx} dBm`   TX: `{olt_tx} dBm`\n"
-        # f"{seccion_ping}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Estado de la ONU: {icono_optico} *{estado_optico}*"
     )
-
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║                       MAIN                              ║

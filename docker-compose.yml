@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: fibrahogar-bot
+    container_name: conet-bot
     restart: unless-stopped
     dns:                      # 👈 forzar DNS de Google
       - 8.8.8.8
