@@ -23,21 +23,23 @@ API_BASE = os.environ.get("API_BASE", "http://api-server:4001")
 USUARIOS_FILE = os.environ.get("USUARIOS_FILE", "usuarios.json")
 
 ZONAS = [
-    "GTRE01", "BRMOESTE01", "BRMNORTE1",
+    "GTRE01", "BRMO01", "BRMN01",
     "CBDR01",  "BRMF01",    "CRCO01",
-    "QBOR01",  "BRMZI01",
+    "QBOR01",  "BRMZI01", "TCYO01", "CRCGT01"
 ]
 
 ZONAS_NOMBRES = {
-    "GTRE01":     "Guatire — GTRE01",
-    "BRMOESTE01": "Barquisimeto Oeste — BRMOESTE01",
-    "BRMNORTE1":  "Barquisimeto Norte — BRMNORTE1",
-    "CBDR01":     "Cabudare — CBDR01",
-    "BRMF01":     "Barquisimeto Fundalara — BRMF01",
-    "CRCO01":     "Caricuao — CRCO01",
-    "QBOR01":     "Quíbor — QBOR01",
-    "BRMZI01":    "Barquisimeto Zona Industrial — BRMZI01",
-    "CRR01":      "Carora — CRR01",
+    "GTRE01":     "Guatire",
+    "BRMO01":     "Barquisimeto Oeste",
+    "BRMN01":     "Barquisimeto Norte",
+    "CBDR01":     "Cabudare",
+    "BRMF01":     "Barquisimeto Fundalara",
+    "CRCO01":     "Caricuao",
+    "QBOR01":     "Quíbor",
+    "BRMZI01":    "Barquisimeto Zona Industrial",
+    "CRR01":      "Carora",
+    "TCYO01":     "Tocuyo",
+    "CRCGT01":    "Guarataro",
 }
 
 # ── Estados ───────────────────────────────────────────────────
@@ -560,9 +562,9 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data_field = data.get("data") if isinstance(data, dict) else data
 
         if isinstance(data_field, dict):
-            registros = [data_field]          # un solo contrato → lo envolvemos en lista
+            registros = [data_field]
         elif isinstance(data_field, list):
-            registros = data_field            # varios contratos → ya es lista
+            registros = data_field
         else:
             registros = []
 
@@ -577,8 +579,6 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ESPERANDO_CEDULA
 
-        # Cada registro tiene cliente.wisphub (contrato) y cliente.cliente815
-        # (lista de registros ópticos/815; puede ser null o vacía)
         mensajes_a_enviar = []
         for registro in registros:
             cliente           = registro.get("cliente", registro)
@@ -587,19 +587,17 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
             meta              = cliente.get("meta", {})
 
             if not cliente815_lista:
-                # Sin datos 815 — wisphub + sección óptica vacía
                 mensajes_a_enviar.append(formatear_cliente(wisphub, None, meta))
             else:
-                # Un mensaje por cada registro 815 asociado al mismo contrato
                 for c815 in cliente815_lista:
                     mensajes_a_enviar.append(formatear_cliente(wisphub, c815, meta))
 
         log.info(f"[api] encontrado — cedula={cedula} contratos={len(registros)} mensajes={len(mensajes_a_enviar)}")
         await msg.delete()
 
-        for i, texto in enumerate(mensajes_a_enviar):
+        for i, (texto, teclado) in enumerate(mensajes_a_enviar):
             log.info(f"[resultado] {i+1}/{len(mensajes_a_enviar)}")
-            await update.message.reply_text(texto, parse_mode="Markdown")
+            await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=teclado)
 
         await update.message.reply_text(
             f"🪪 Escribe otra cédula para consultar en *{zona}*\n"
@@ -619,6 +617,74 @@ async def cedula_recibida(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ESPERANDO_CEDULA
 
+
+async def diagnostico_desde_cedula(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user  = update.effective_user
+
+    if not autorizado(user.username):
+        await rechazar(update)
+        return
+
+    await query.answer("🔍 Consultando diagnóstico...")
+
+    _, zona, serial = query.data.split(":", 2)
+
+    log.info(f"[diag_cli] usuario={user.username} zona={zona} serial={serial}")
+
+    msg = await query.message.reply_text(
+        f"⏳ *Paso 1/3* — Conectando con servidor *{zona}*...",
+        parse_mode="Markdown"
+    )
+
+    try:
+        url = f"{API_BASE}/api/onu/buscar/{zona}/{serial}"
+        log.info(f"[api] GET {url}")
+
+        await msg.edit_text(
+            f"⏳ *Paso 2/3* — Buscando serial `{serial}`...\n_Esto puede tardar unos segundos_",
+            parse_mode="Markdown"
+        )
+
+        response = requests.get(url, timeout=60)
+        log.info(f"[api] status={response.status_code} zona={zona} serial={serial}")
+
+        await msg.edit_text(
+            "⏳ *Paso 3/3* — Ejecutando diagnóstico en tiempo real...",
+            parse_mode="Markdown"
+        )
+
+        data = response.json()
+
+        if data.get("estado") != "OK":
+            log.warning(f"[api] no encontrada — {data.get('mensaje')}")
+            await msg.edit_text(
+                f"⚠️ *{data.get('mensaje', 'No encontrada')}*\n"
+                f"_{data.get('detalle', '')}_",
+                parse_mode="Markdown"
+            )
+            return
+
+        clientes = data["resultado"]["clientes"]
+        total    = data["resultado"].get("total", len(clientes))
+        log.info(f"[api] encontrada — zona={zona} serial={serial} total={total}")
+
+        await msg.delete()
+
+        for i, cliente in enumerate(clientes):
+            estado_onu = cliente.get("diagnostico", {}).get("onu", {}).get("onu_status", "—")
+            log.info(f"[resultado] {i+1}/{total} nombre={cliente.get('nombre')} estado={estado_onu}")
+            await query.message.reply_text(formatear_onu(cliente), parse_mode="Markdown")
+
+    except requests.exceptions.Timeout:
+        log.error(f"[api] Timeout — zona={zona} serial={serial}")
+        await msg.edit_text("❌ *Timeout* — La API tardó demasiado.", parse_mode="Markdown")
+    except requests.exceptions.ConnectionError:
+        log.error(f"[api] ConnectionError — {API_BASE}")
+        await msg.edit_text("❌ *Sin conexión* — No se pudo conectar con el servidor.", parse_mode="Markdown")
+    except Exception as e:
+        log.exception(f"[error] zona={zona} serial={serial} — {e}")
+        await msg.edit_text(f"❌ *Error inesperado:*\n`{e}`", parse_mode="Markdown")
 # ╔══════════════════════════════════════════════════════════╗
 # ║                   MENU HANDLER                          ║
 # ╚══════════════════════════════════════════════════════════╝
@@ -890,7 +956,7 @@ def formatear_onu(c: dict) -> str:
     )
 
 
-def formatear_cliente(wisphub: dict, c815: dict | None, meta: dict | None = None) -> str:
+def formatear_cliente(wisphub: dict, c815, meta: dict = None):
     meta = meta or {}
 
     nombre         = wisphub.get("nombre", "—")
@@ -908,17 +974,23 @@ def formatear_cliente(wisphub: dict, c815: dict | None, meta: dict | None = None
     plan_nombre    = plan.get("nombre", "—") if isinstance(plan, dict) else str(plan)
     estado_wisphub = wisphub.get("estado", "—")
 
-    # ── Datos 815 / ópticos (pueden no existir) ──────────────
     if c815:
         activa        = c815.get("activa", None)
         serial        = c815.get("numero_de_serie", "—")
         mac           = c815.get("direccion_mac", "—")
         estado_optico = c815.get("estado_optico", "—")
+        onu_rx        = c815.get("ultimo_rx_power_onu", "—")
+        onu_tx        = c815.get("ultimo_tx_power_onu", "—")
+        olt_rx        = c815.get("ultimo_rx_power_puerto", "—")
+        olt_tx        = c815.get("ultimo_tx_power_puerto", "—")
+        zona_815      = c815.get("ciudad_815")
     else:
         activa        = None
         serial        = "—"
         mac           = "—"
         estado_optico = "—"
+        onu_rx = onu_tx = olt_rx = olt_tx = "—"
+        zona_815      = None
 
     estado_815   = "✅ Activo" if activa is True else ("❌ Inactivo" if activa is False else "— Desconocido")
     es_offline   = "offline" in str(estado_optico).lower()
@@ -929,7 +1001,7 @@ def formatear_cliente(wisphub: dict, c815: dict | None, meta: dict | None = None
         warning = meta.get("warning", "Sin datos en 815")
         aviso_815 = f"\n⚠️ _{warning}_"
 
-    return (
+    texto = (
         f"👤 *{nombre}*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🪪 *Cédula:* {cedula}\n"
@@ -954,6 +1026,14 @@ def formatear_cliente(wisphub: dict, c815: dict | None, meta: dict | None = None
         f"Estado de la ONU: {icono_optico} *{estado_optico}*"
     )
 
+    teclado = None
+    if c815 and zona_815 and serial and serial != "—":
+        teclado = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔍 Ver diagnóstico ONU", callback_data=f"diag_cli:{zona_815}:{serial}")],
+            [InlineKeyboardButton("❌ Salir", callback_data="salir")],
+        ])
+
+    return texto, teclado
 # ╔══════════════════════════════════════════════════════════╗
 # ║                       MAIN                              ║
 # ╚══════════════════════════════════════════════════════════╝
@@ -1025,6 +1105,7 @@ def main():
 
     # ── Handler global para ciudad: desde /start ─────────────
     app.add_handler(CallbackQueryHandler(ciudad_seleccionada, pattern=r"^ciudad:"))
+    app.add_handler(CallbackQueryHandler(diagnostico_desde_cedula, pattern=r"^diag_cli:"))
 
     # ── Conversations primero para que capturen menu:* ────────
     app.add_handler(conv_ciudad)
